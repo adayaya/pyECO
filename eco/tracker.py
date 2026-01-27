@@ -27,32 +27,44 @@ class ECOTracker:
         self._frames_since_last_train = 0
         if config.use_gpu:
             cp.cuda.Device(config.gpu_id).use()
-
-    def _cosine_window(self, size):
+    """
+    1. 为什么要用这个？(核心原理)
+    在 ECO 这类算法中,我们需要把图像转换到频域(Fourier Domain)进行计算。 傅里叶变换(FFT)有一个前提假设:信号是无限周期循环的。
+    但是,真实的图像块并不是周期的(图片左边缘和右边缘通常长得不一样)。如果我们直接对图片做 FFT,边缘的不连续会产生大量的高频噪声(称为“频谱泄露”或边界效应),严重干扰跟踪结果。
+    余弦窗的作用就像一个“聚光灯”:
+    它中间的值是 1(保留目标中心的信息)。
+    它边缘的值平滑地降为 0。
+    结果:当我们用这个窗乘以图像块时,图像边缘会被自然地“抹黑”变成 0。这样,图片的左边和右边都是 0,就完美衔接了,FFT 就不会报错乱了。
+    """
+    def _cosine_window(self, size): # 生成二维汉宁窗
         """
             get the cosine window
         """
-        cos_window = np.hanning(int(size[0]+2))[:, np.newaxis].dot(np.hanning(int(size[1]+2))[np.newaxis, :])
-        cos_window = cos_window[1:-1, 1:-1][:, :, np.newaxis, np.newaxis].astype(np.float32)
+        cos_window = np.hanning(int(size[0]+2))[:, np.newaxis].dot(np.hanning(int(size[1]+2))[np.newaxis, :]) # 用1维汉宁窗生成2维汉宁窗
+        cos_window = cos_window[1:-1, 1:-1][:, :, np.newaxis, np.newaxis].astype(np.float32) # 去除边缘
         if config.use_gpu:
-            cos_window = cp.asarray(cos_window)
+            cos_window = cp.asarray(cos_window) # 搬到显存
         return cos_window
 
-    def _get_interp_fourier(self, sz):
+    """
+    在 ECO 这类相关滤波跟踪算法中，为了实现亚像素级别的定位精度（不仅仅精确到整数坐标，而是精确到小数坐标，如 (10.5, 20.3)），算法需要在频域对特征图进行插值。
+    这段代码并没有直接做插值，而是准备好了用来做插值的"工具"（滤波器）。
+    """
+    def _get_interp_fourier(self, sz): # 在频域内计算插值函数的核函数
         """
-            compute the fourier series of the interpolation function.
+            compute the fourier series of the interpolation function. 计算插值核的傅里叶系数
         """
-        f1 = np.arange(-(sz[0]-1) / 2, (sz[0]-1)/2+1, dtype=np.float32)[:, np.newaxis] / sz[0]
-        interp1_fs = np.real(cubic_spline_fourier(f1, config.interp_bicubic_a) / sz[0])
-        f2 = np.arange(-(sz[1]-1) / 2, (sz[1]-1)/2+1, dtype=np.float32)[np.newaxis, :] / sz[1]
+        f1 = np.arange(-(sz[0]-1) / 2, (sz[0]-1)/2+1, dtype=np.float32)[:, np.newaxis] / sz[0] # 生成频率变量 （高度）方向
+        interp1_fs = np.real(cubic_spline_fourier(f1, config.interp_bicubic_a) / sz[0]) # 计算了三次样条函数在频域的解析式，在时域做双三次插值，等于在频域乘以这个函数的系数
+        f2 = np.arange(-(sz[1]-1) / 2, (sz[1]-1)/2+1, dtype=np.float32)[np.newaxis, :] / sz[1] # 生成频率变量 （宽度）方向
         interp2_fs = np.real(cubic_spline_fourier(f2, config.interp_bicubic_a) / sz[1])
-        if config.interp_centering:
+        if config.interp_centering: # 中心对齐，修正特征网格与图像像素网格之间的半个像素偏差
             f1 = np.arange(-(sz[0]-1) / 2, (sz[0]-1)/2+1, dtype=np.float32)[:, np.newaxis]
-            interp1_fs = interp1_fs * np.exp(-1j*np.pi / sz[0] * f1)
+            interp1_fs = interp1_fs * np.exp(-1j*np.pi / sz[0] * f1) # 一个复指数相位移动=时域的平移，修正半个像素的偏差
             f2 = np.arange(-(sz[1]-1) / 2, (sz[1]-1)/2+1, dtype=np.float32)[np.newaxis, :]
             interp2_fs = interp2_fs * np.exp(-1j*np.pi / sz[1] * f2)
 
-        if config.interp_windowing:
+        if config.interp_windowing: # 频域加窗，减少插值伪影
             win1 = np.hanning(sz[0]+2)[:, np.newaxis]
             win2 = np.hanning(sz[1]+2)[np.newaxis, :]
             interp1_fs = interp1_fs * win1[1:-1]
@@ -64,7 +76,16 @@ class ECOTracker:
             return (cp.asarray(interp1_fs[:, :, np.newaxis, np.newaxis]),
                     cp.asarray(interp2_fs[:, :, np.newaxis, np.newaxis]))
 
-    def _get_reg_filter(self, sz, target_sz, reg_window_edge):
+    """
+    空间正则化滤波器的作用是对滤波器的权重进行空间上的约束，防止滤波器在某些区域过度响应，从而提高跟踪的鲁棒性和准确性。
+    具体来说，空间正则化滤波器通过在滤波器的权重上施加一个空间变化的惩罚项，使得滤波器在目标区域内的响应较强，而在背景区域的响应较弱。
+    这样可以有效地抑制背景干扰，提高跟踪器对目标的区分能力。
+    这使得 ECO 即使在搜索范围很大的情况下，也不会轻易被背景里的树木、行人等干扰物带偏。
+    这个正则化矩阵只有在以下两种情况同时发生时，才需要重新调用该函数：滤波器更新时，且目标的尺寸变化时。
+    大部分帧（检测帧）完全不需要计算它；即使在训练帧，如果目标大小没变，也可以直接复用上一帧的矩阵。
+    用于加速滤波器更新的速度。
+    """
+    def _get_reg_filter(self, sz, target_sz, reg_window_edge): #对正则化矩阵稀疏化，人为设定的惩罚规则，告诉滤波器，哪些区域可以重点关注，哪些区域需要忽略
         """
             compute the spatial regularization function and drive the
             corresponding filter operation used for optimization
@@ -78,20 +99,25 @@ class ECOTracker:
             wcg = np.arange(-(sz[0]-1)/2, (sz[1]-1)/2+1, dtype=np.float32)
             wrs, wcs = np.meshgrid(wrg, wcg)
 
-            # construct the regularization window
+            # construct the regularization window 构造了数学上的抛物面，形状像一个碗底：中心最低，边缘最高
+            # 根据距离中心的远近，计算每个位置的正则化权重
             reg_window = (reg_window_edge - config.reg_window_min) * (np.abs(wrs/reg_scale[0])**config.reg_window_power + \
                             np.abs(wcs/reg_scale[1])**config.reg_window_power) + config.reg_window_min
-
+            # 在早期的算法（如 SRDCF）中，为了应用这个“碗”状的惩罚，需要进行复杂的数学运算（时域乘法 = 频域卷积）。频域卷积的计算量是巨大的。
+            # ECO 的作者想出了一个绝招：既然这个“碗”在频域里很多系数都很小，不如直接把它们扔掉（置为0）？
             # compute the DFT and enforce sparsity
-            reg_window_dft = fft2(reg_window) / np.prod(sz)
+            reg_window_dft = fft2(reg_window) / np.prod(sz) # 计算正则化窗口的傅里叶变换，转到频域
+            # 强行稀疏化，把原本很小的只直接变成0，这一步极大地减少了非零元素的数量。原本需要做全尺寸卷积，现在只需要对剩下那一点点非零值做计算，速度提升了几个数量级。
             reg_window_dft[np.abs(reg_window_dft) < config.reg_sparsity_threshold* np.max(np.abs(reg_window_dft.flatten()))] = 0
 
-            # do the inverse transform, correct window minimum
+            # do the inverse transform, correct window minimum 
+            # 修正直流分量，确保时域的正则化窗口的最小值是 config.reg_window_min
             reg_window_sparse = np.real(ifft2(reg_window_dft))
             reg_window_dft[0, 0] = reg_window_dft[0, 0] - np.prod(sz) * np.min(reg_window_sparse.flatten()) + config.reg_window_min
             reg_window_dft = np.fft.fftshift(reg_window_dft).astype(np.complex64)
 
             # find the regularization filter by removing the zeros
+            # 压缩矩阵，只保留那些非零行和列，后续计算时，矩阵乘法的规模就变得非常小了
             row_idx = np.logical_not(np.all(reg_window_dft==0, axis=1))
             col_idx = np.logical_not(np.all(reg_window_dft==0, axis=0))
             mask = np.outer(row_idx, col_idx)
@@ -104,6 +130,12 @@ class ECOTracker:
         else:
             return cp.asarray(reg_filter.T)
 
+    # 初始化投影矩阵，用于将高维特征降维到较低维度，以减少计算复杂度和内存占用。 分解卷积的实现起点。
+    """
+    输入: 你提取的特征(特别是深度学习特征 ResNet/VGG)维度通常极高(几百甚至上千个通道)。
+    问题: 如果直接在这么高维的特征上做相关滤波(卷积)，计算量会大到爆炸，根本达不到实时。
+    解决: ECO 引入了一个投影矩阵 P。
+    """
     def _init_proj_matrix(self, init_sample, compressed_dim, proj_method):
         """
             init the projection matrix
@@ -112,12 +144,17 @@ class ECOTracker:
             xp = cp.get_array_module(init_sample[0])
         else:
             xp = np
+        # 变形，把（H，W，C）变成（Pixels，C）
         x = [xp.reshape(x, (-1, x.shape[2])) for x in init_sample]
+        # 去均值， 做PCA标准步骤
         x = [z - z.mean(0) for z in x]
         proj_matrix_ = []
+        # PCA主成分分析
         if config.proj_init_method == 'pca':
             for x_, compressed_dim_  in zip(x, compressed_dim):
+                # 计算协方差矩阵的近似（X^T * X）,得到（C,C）的矩阵，代表不同通道间的相关性，利用SVD分解找到特征变化最剧烈的那些方向。
                 proj_matrix, _, _ = xp.linalg.svd(x_.T.dot(x_))
+                # 提取前K个主成分
                 proj_matrix = proj_matrix[:, :compressed_dim_]
                 proj_matrix_.append(proj_matrix)
         elif config.proj_init_method == 'rand_uni':
@@ -127,7 +164,7 @@ class ECOTracker:
                 proj_matrix_.append(proj_matrix)
         return proj_matrix_
 
-    def _proj_sample(self, x, P):
+    def _proj_sample(self, x, P): # 投影样本，降维
         if config.use_gpu:
             xp = cp.get_array_module(x[0])
         else:
