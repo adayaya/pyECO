@@ -6,7 +6,7 @@ cd pyECO/eco/features/
 
 python setup.py build_ext --inplace
 
-pip install numpy scipy python-opencv glob pandas pillow
+pip install numpy scipy opencv-python glob pandas pillow
 
 # if you want to use deep feature 
 pip install mxnet-cu80(or 90 according to your cuda version)
@@ -14,7 +14,7 @@ pip install cupy-cu80(or 90 according to your cuda version)
 
 cd pyECO/
 
-python bin/demo_ECO_hc.py --video_dir path/to/video
+python bin/demo_ECO_hc.py --video_dir ./sequences/Crossing/
 ```
 
 ## Convert to deep feature version

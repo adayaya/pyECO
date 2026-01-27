@@ -31,7 +31,7 @@ class ScaleFilter:
 
         ys = np.exp(-0.5 * (scale_exp_shift ** 2) / (scale_sigma ** 2))
         self.yf = np.real(fft(ys))[np.newaxis, :]
-        self.window = signal.hann(ys.shape[0])[np.newaxis, :].astype(np.float32)
+        self.window = signal.windows.hann(ys.shape[0])[np.newaxis, :].astype(np.float32)
 
         # make sure the scale model is not to large, to save computation time
         if config.scale_model_factor**2 * np.prod(init_target_sz) > config.scale_model_max_area:

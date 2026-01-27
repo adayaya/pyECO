@@ -9,7 +9,7 @@ sys.path.append('./')
 
 from eco import ECOTracker
 from PIL import Image
-
+import time
 import argparse
 
 def main(video_dir):
@@ -18,6 +18,10 @@ def main(video_dir):
            key=lambda x: int(os.path.basename(x).split('.')[0]))
     # frames = [cv2.cvtColor(cv2.imread(filename), cv2.COLOR_BGR2RGB) for filename in filenames]
     frames = [np.array(Image.open(filename)) for filename in filenames]
+    print("---------------- DEBUG INFO ----------------")
+    print(f"正在读取的文件夹路径: {video_dir}")
+    print(f"找到的图片数量: {len(frames) if 'frames' in locals() else '未定义'}")
+    print("--------------------------------------------")
     height, width = frames[0].shape[:2]
     if len(frames[0].shape) == 3:
         is_color = True
@@ -33,7 +37,8 @@ def main(video_dir):
     # img_writer = cv2.VideoWriter(os.path.join('./videos', title+'.avi'),
     #         fourcc, 25, (width, height))
     # starting tracking
-    tracker = ECOTracker(is_color)
+    tic = time.time()
+    tracker = ECOTracker(is_color) # 跟踪器
     vis = True
     for idx, frame in enumerate(frames):
         if idx == 0:
@@ -98,13 +103,15 @@ def main(video_dir):
             score_map = cv2.addWeighted(crop_img, 0.6, score, 0.4, 0)
             frame[ymin:ymax, xmin:xmax] = score_map
 
-        frame = cv2.putText(frame, str(idx), (5, 20), cv2.FONT_HERSHEY_COMPLEX_SMALL, 1, (0, 255, 0), 1)
+        # frame = cv2.putText(frame, str(idx), (5, 20), cv2.FONT_HERSHEY_COMPLEX_SMALL, 1, (0, 255, 0), 1)
         # img_writer.write(frame)
-        cv2.imshow(title, frame)
-        cv2.waitKey(1)
+        # cv2.imshow(title, frame)
+        # cv2.waitKey(1)
+    duration = time.time() - tic
+    print(round(len(frames) / duration, 3), "FPS")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('--video_dir', type=str, default='sequences/Crossing/')
+    parser.add_argument('--video_dir', type=str, default='./sequences/Crossing/')
     args = parser.parse_args()
     main(args.video_dir)
