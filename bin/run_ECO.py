@@ -50,7 +50,7 @@ def run_ECO(seq):
     for idx, frame in enumerate(frames):
         if idx == 0:
             bbox = (x, y, w, h)
-            tracker.init(frame, bbox)
+            tracker.init(frame, bbox) # 这里的bbox是用来计算初始要识别的位置吧 
             bbox = (bbox[0], bbox[1], bbox[0]+bbox[2], bbox[1]+bbox[3])
         elif idx < len(frames) - 1:
             bbox = tracker.update(frame, True)

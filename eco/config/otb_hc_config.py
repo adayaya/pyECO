@@ -1,18 +1,18 @@
 class OTBHCConfig:
-    fhog_params = {'fname': 'fhog',
+    fhog_params = {'fname': 'fhog', # 方向梯度直方图，捕捉边缘和纹理信息
                    'num_orients': 9,
-                   'cell_size': 6,
-                   'compressed_dim': 10,
+                   'cell_size': 6, # 计算特征网格大小
+                   'compressed_dim': 10, # 压缩到10维
                    }
 
-    cn_params = {"fname": 'cn',
+    cn_params = {"fname": 'cn',# 将RGB颜色映射到人类语言中的颜色名称
                  "table_name": "CNnorm",
                  "use_for_color": True,
-                 "cell_size": 4,
-                 "compressed_dim": 3,
+                 "cell_size": 4, 
+                 "compressed_dim": 3, # 压缩到3维
                  }
 
-    ic_params = {'fname': 'ic',
+    ic_params = {'fname': 'ic', # 灰度强度通道
                  "table_name": "intensityChannelNorm6",
                  "use_for_color": False,
                  "cell_size": 4,
@@ -21,45 +21,45 @@ class OTBHCConfig:
 
     features = [fhog_params, cn_params, ic_params]
 
-    # feature parameters
-    normalize_power = 2                 # Lp normalization with this p
+    # feature parameters 特征参数
+    normalize_power = 2                 # Lp normalization with this p L2正则化
     normalize_size = True               # also normalize with respect to the spatial size of the feature
     normalize_dim = True                # also normalize with respect to the dimensionality of the feature
     square_root_normalization = False   #
 
-    # image sample parameters
+    # image sample parameters 采样区域参数
     search_area_shape = 'square'        # the shape of the samples
-    search_area_scale = 4.0             # the scaling of the target size to get the search area
+    search_area_scale = 4.0             # the scaling of the target size to get the search area，设置目标大小的4倍作为搜索区域
     min_image_sample_size = 150 ** 2    # minimum area of image samples
-    max_image_sample_size = 200 ** 2    # maximum area of image samples
-
-    # detection parameters
+    max_image_sample_size = 200 ** 2    # maximum area of image samples 限制目标缩小范围再提取特征
+ 
+    # detection parameters 检测参数，在得到粗略的分数图后，进行位置精细化
     refinement_iterations = 1           # number of iterations used to refine the resulting position in a frame
     newton_iterations = 5               # the number of Netwon iterations used for optimizing the detection score
     clamp_position = False              # clamp the target position to be inside the image
 
-    # learning parameters
+    # learning parameters 学习参数
     output_sigma_factor = 1 / 14.       # label function sigma
-    learning_rate = 0.009               # learning rate
-    num_samples = 30                    # maximum number of stored training samples
-    sample_replace_startegy = 'lowest_prior' # which sample to replace when the memory is full
-    lt_size = 0                         # the size of the long-term memory (where all samples have equal weight)
-    train_gap = 5                       # the number of intermediate frames with no training (0 corresponds to the training every frame)
+    learning_rate = 0.009               # learning rate 每一帧信息的更新程度
+    num_samples = 30                    # maximum number of stored training samples 保留的样本数量
+    sample_replace_startegy = 'lowest_prior' # which sample to replace when the memory is full 样本替换策略
+    lt_size = 0                         # the size of the long-term memory (where all samples have equal weight) 
+    train_gap = 5                       # the number of intermediate frames with no training (0 corresponds to the training every frame) 每隔5帧更新一次
     skip_after_frame = 10                # after which frame number the sparse update scheme should start (1 is directly)
     use_detection_sample = True         # use the sample that was extracted at the detection stage also for learning
 
-    # factorized convolution parameters
+    # factorized convolution parameters 分解卷积参数，降维
     use_projection_matrix = True        # use projection matrix, i.e. use the factorized convolution formulation
     update_projection_matrix = True     # whether the projection matrix should be optimized or not 
-    proj_init_method = 'pca'            # method for initializing the projection matrix
+    proj_init_method = 'pca'            # method for initializing the projection matrix 投影矩阵初始化使用PCA降维
     projection_reg = 1e-7               # regularization parameter of the projection matrix
 
-    # generative sample space model parameters
-    use_sample_merge = True             # use the generative sample space model to merge samples
+    # generative sample space model parameters 样本空间生成模型 GMM 
+    use_sample_merge = True             # use the generative sample space model to merge samples， GMM合并样本
     sample_merge_type = 'merge'         # strategy for updating the samples
     distance_matrix_update_type = 'exact' # strategy for updating the distance matrix
 
-    # CG paramters
+    # CG paramters 滤波器迭代参数
     CG_iter = 5                         # the number of Conjugate Gradient iterations in each update after the first time
     init_CG_iter = 5 * 15              # the total number of Conjugate Gradient iterations used in the first time
     init_GN_iter = 5                   # the number of Gauss-Netwon iterations used in the first frame (only if the projection matrix is updated)
@@ -83,7 +83,7 @@ class OTBHCConfig:
     interp_centering = True             # center the kernel at the feature sample
     interp_windowing = False            # do additional windowing on the Fourier coefficients of the kernel
 
-    # scale parameters
+    # scale parameters 尺度缩放参数，跟踪器不仅计算位置，还要计算目标的尺度变化
     # number_of_scales = 5              # number of scales to run the detector
     # scale_step = 1.01                 # the scale factor
     use_scale_filter = True             # use the fDSST scale filter or not 
