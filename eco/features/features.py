@@ -30,7 +30,7 @@ class Feature:
             img_sample_sz = mround(new_img_sample_sz + best_choice)
 
         self.sample_sz = img_sample_sz
-        self.data_sz = [img_sample_sz // self._cell_size]
+        self.data_sz = [img_sample_sz // self._cell_size] # 目标形状/cell大小
         return img_sample_sz
 
     def _sample_patch(self, im, pos, sample_sz, output_sz):
@@ -107,7 +107,7 @@ class ResNet50Feature(CNNFeature):
         self.penalty = [0., 0.]
         self.min_cell_size = np.min(self._cell_size)
 
-    def init_size(self, img_sample_sz, cell_size=None):
+    def init_size(self, img_sample_sz, cell_size=None): # 目标要裁剪为多大的形状
         # only support img_sample_sz square
         img_sample_sz = img_sample_sz.astype(np.int32)
         feat1_shape = np.ceil(img_sample_sz / 4)
@@ -124,8 +124,8 @@ class ResNet50Feature(CNNFeature):
         img_sample_sz = desired_sz * 16
         self.num_dim = [64, 1024]
         self.sample_sz = img_sample_sz
-        self.data_sz = [np.ceil(img_sample_sz / 4),
-                        np.ceil(img_sample_sz / 16)]
+        self.data_sz = [np.ceil(img_sample_sz / 4), # 目标形状/4
+                        np.ceil(img_sample_sz / 16)] # 目标形状/16
         return img_sample_sz
 
     def _forward(self, x):
@@ -213,7 +213,7 @@ class FHogFeature(Feature):
         self._bin_size = cell_size
         self._num_orients = num_orients
         self._clip = clip
-
+        # 输出size： 输入size//6
         self.min_cell_size = self._cell_size
         self.num_dim = [3 * num_orients + 5 - 1]
         self.penalty = [0.]
