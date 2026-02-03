@@ -8,7 +8,7 @@ from scipy import signal
 # from numpy.fft import fftshift
 
 from .config import config
-from .features import FHogFeature, TableFeature, mround, ResNet50Feature, VGG16Feature
+from .features import FHogFeature, TableFeature, mround, ResNet50Feature, VGG16Feature, MobileNetV3Feature
 from .fourier_tools import cfft2, interpolate_dft, shift_sample, full_fourier_coeff,\
         cubic_spline_fourier, compact_fourier_coeff, ifft2, fft2, sample_fs
 from .optimize_score import optimize_score
@@ -231,6 +231,8 @@ class ECOTracker:
                     self._features.append(ResNet50Feature(**feature))
                 elif netname == 'vgg16':
                     self._features.append(VGG16Feature(**feature))
+                elif netname == 'mobilenetv3':
+                    self._features.append(MobileNetV3Feature(**feature))
             else:
                 raise("unimplemented features")
         self._features = sorted(self._features, key=lambda x:x.min_cell_size) # Resnet：cell sz[4,16] FHOG: cell sz[6]
@@ -337,7 +339,7 @@ class ECOTracker:
             self._scale_step = config.scale_step
             scale_exp = np.arange(-np.floor((self._num_scales-1)/2), np.ceil((self._num_scales-1)/2)+1)
             self._scale_factor = self._scale_step**scale_exp
-            print(self._scale_factor)
+            # print(self._scale_factor)
 
         if self._num_scales > 0:
             # force reasonable scale changes
@@ -363,7 +365,7 @@ class ECOTracker:
         # init ana allocate
         self._gmm = GMM(self._num_samples) # (滤波器高、滤波器宽、通道数、样本数)，存储过去几十帧里提取出的、经过压缩的频域特征。
         self._samplesf = [[]] * self._num_feature_blocks # 3个特征块 CNN*2 + HOG*1 [[61,31,10,50]，[61,31,16,50],[15,8,64,50]]
-        print(self._num_feature_blocks)
+        # print(self._num_feature_blocks)
         for i in range(self._num_feature_blocks):
             if not config.use_gpu:
                 self._samplesf[i] = np.zeros((int(filter_sz[i, 0]), int((filter_sz[i, 1]+1)/2),

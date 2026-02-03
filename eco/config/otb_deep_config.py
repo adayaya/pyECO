@@ -22,9 +22,13 @@ class OTBDeepConfig:
     #              # "nDim": 10
     #              }
 
-    cnn_params = {'fname': "cnn-resnet50",
+    cnn_params = {'fname': "cnn-mobilenetv3", #轻量级网络
                   'compressed_dim': [16, 64]
                   }
+
+    # cnn_params = {'fname': "cnn-resnet50",
+    #               'compressed_dim': [16, 64]
+    #               }
     # cnn_params = {'fname': "cnn-vgg16",
     #               'compressed_dim': [16, 64]
     #               }
