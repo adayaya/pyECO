@@ -8,7 +8,7 @@ from scipy import signal
 # from numpy.fft import fftshift
 
 from .config import config
-from .features import FHogFeature, TableFeature, mround, ResNet50Feature, VGG16Feature, MobileNetV3Feature
+from .features import FHogFeature, TableFeature, mround, ResNet18HybridFeature # MobileNetV3Feature ResNet50Feature, VGG16Feature,
 from .fourier_tools import cfft2, interpolate_dft, shift_sample, full_fourier_coeff,\
         cubic_spline_fourier, compact_fourier_coeff, ifft2, fft2, sample_fs
 from .optimize_score import optimize_score
@@ -233,6 +233,8 @@ class ECOTracker:
                     self._features.append(VGG16Feature(**feature))
                 elif netname == 'mobilenetv3':
                     self._features.append(MobileNetV3Feature(**feature))
+                elif netname == 'resnet18Hybrid':
+                    self._features.append(ResNet18HybridFeature(**feature))
             else:
                 raise("unimplemented features")
         self._features = sorted(self._features, key=lambda x:x.min_cell_size) # Resnet：cell sz[4,16] FHOG: cell sz[6]

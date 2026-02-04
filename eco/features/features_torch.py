@@ -123,7 +123,7 @@ class MobileNetV3Feature(CNNFeature):
         self.device = torch.device('cuda' if torch.cuda.is_available() and config.use_gpu else 'cpu')
         
         # 加载 MobileNetV3-Small
-        print("Loading MobileNetV3-Small (PyTorch)...")
+        # print("Loading MobileNetV3-Small (PyTorch)...")
         self.net = models.mobilenet_v3_small(weights=models.MobileNet_V3_Small_Weights.DEFAULT)
         
         # 定义特征提取层
@@ -143,7 +143,7 @@ class MobileNetV3Feature(CNNFeature):
 
         # 配置参数 (用于 init_size 计算)
         self._compressed_dim = compressed_dim
-        self._cell_size = [4, 16] # 对应两个特征层的下采样倍率
+        self._cell_size = [4, 8] # 对应两个特征层的下采样倍率
         self.penalty = [0., 0.]
         self.min_cell_size = np.min(self._cell_size)
 
@@ -156,13 +156,13 @@ class MobileNetV3Feature(CNNFeature):
         
         # MobileNetV3 Small 通道数:
         # Layer 1 (idx 1): 16 channels
-        # Layer 2 (idx 9): 96 channels (MobileNetV3 Small 的 layer 9 输出通常是 576)
-        # 注意：这里需要根据实际打印出的网络结构确认通道数，MobileNetV3-Small 默认此处是 576
-        self.num_dim = [16, 96] 
+        # Layer 2 (idx 8): 48 channels (MobileNetV3 Small 的 layer 8 输出通常是 48)
+        # 注意：这里需要根据实际打印出的网络结构确认通道数，MobileNetV3-Small 默认此处是 48
+        self.num_dim = [16, 24] 
         
         self.sample_sz = img_sample_sz
         self.data_sz = [np.ceil(img_sample_sz / 4),
-                        np.ceil(img_sample_sz / 16)]
+                        np.ceil(img_sample_sz / 8)]
         return img_sample_sz
 
     def _forward(self, x):
@@ -174,7 +174,7 @@ class MobileNetV3Feature(CNNFeature):
             f1 = x # Save stride 4 feature
 
             # Layer 2: Stride 16 (features 2-9)
-            for i in range(2, 10):
+            for i in range(2, 4):
                 x = self.features[i](x)
             f2 = x # Save stride 16 feature
 
@@ -186,6 +186,123 @@ class MobileNetV3Feature(CNNFeature):
         f2_np = f2.permute(2, 3, 1, 0).cpu().numpy()
         
         return [f1_np, f2_np]
+
+class ResNet18HybridFeature(CNNFeature):
+    def __init__(self, fname=None, compressed_dim=None):
+        self.device = torch.device('cuda' if torch.cuda.is_available() and config.use_gpu else 'cpu')
+        
+        full_net = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
+        
+        # --- 模块拆分 ---
+        # 1. 浅层部分 (到 layer1 结束)
+        # Input -> /4, 64ch
+        self.stage1 = torch.nn.Sequential(
+            full_net.conv1, full_net.bn1, full_net.relu, full_net.maxpool,
+            full_net.layer1 
+        )
+        
+        # 2. 深层部分 (layer2 + layer3)
+        # layer2: /8, 128ch
+        # layer3: 原本 /16, 我们魔改成 /8 (Dilated), 256ch
+        self.stage2_3 = torch.nn.Sequential(
+            full_net.layer2,
+            full_net.layer3
+        )
+        
+        # 将 layer3 改为空洞卷积 (Stride=1, Dilation=2)
+        self._make_dilated(self.stage2_3[1])
+
+        # 冻结参数
+        for m in [self.stage1, self.stage2_3]:
+            for param in m.parameters():
+                param.requires_grad = False
+            m.eval()
+            m.to(self.device)
+
+        # --- 关键配置 ---
+        # 这里的 compressed_dim 对应 config.py 里的设置
+        # 建议设为 [16, 64]
+        self._compressed_dim = compressed_dim 
+        
+        # 对应两层的下采样倍率: [Stride 4, Stride 8]
+        self._cell_size = [4, 8] 
+        self.min_cell_size = np.min(self._cell_size)
+        self.penalty = [0., 0.]
+
+    def _make_dilated(self, layer_block):
+        for module in layer_block.modules():
+            if isinstance(module, torch.nn.Conv2d):
+                if module.stride == (2, 2):
+                    # 情况 A: 3x3 卷积 (主分支)
+                    # 需要 Dilation=2 和 Padding=2 来保持分辨率并扩大感受野
+                    if module.kernel_size == (3, 3):
+                        module.stride = (1, 1)
+                        module.dilation = (2, 2)
+                        module.padding = (2, 2)
+                    
+                    # 情况 B: 1x1 卷积 (Shortcut 下采样层)
+                    # 只需要改 Stride 为 1，千万不能加 Padding！
+                    elif module.kernel_size == (1, 1):
+                        module.stride = (1, 1)
+                        # module.dilation 保持默认 (1,1) 即可
+                        # module.padding 保持默认 (0,0) 即可
+
+    def init_size(self, img_sample_sz, cell_size=None):
+        img_sample_sz = img_sample_sz.astype(np.int32)
+        
+        # Layer 1: /4
+        feat1_shape = np.ceil(img_sample_sz / 4)
+        # Layer 3: /8
+        feat2_shape = np.ceil(img_sample_sz / 8)
+        
+        desired_sz = feat2_shape + 1 + feat2_shape % 2
+        img_sample_sz = desired_sz * 8
+        
+        # 原始通道数 (用于 PCA 初始化)
+        # Layer 1: 64, Layer 3: 256
+        self.num_dim = [64, 256] 
+        
+        self.sample_sz = img_sample_sz
+        self.data_sz = [np.ceil(img_sample_sz / 4),
+                        np.ceil(img_sample_sz / 8)]
+        return img_sample_sz
+
+    def _forward(self, x):
+        with torch.no_grad():
+            # 跑第一段
+            x1 = self.stage1(x) # 得到 f1 (64ch, Stride 4)
+            
+            # 跑第二段 (接着 x1 跑)
+            x2 = self.stage2_3(x1) # 得到 f2 (256ch, Stride 8)
+            
+        # 转换维度 (N, C, H, W) -> (H, W, C, N)
+        f1_np = self.quantize_simulate(x1.permute(2, 3, 1, 0).cpu().numpy())
+        f2_np = self.quantize_simulate(x2.permute(2, 3, 1, 0).cpu().numpy())
+        
+        return [f1_np, f2_np]
+
+    def quantize_simulate(self,tensor_data, bits=8):
+        # 简单的线性量化模拟
+        # 1. 找最大最小值
+        min_val = tensor_data.min()
+        max_val = tensor_data.max()
+        
+        # 2. 计算 Scale
+        # 2^8 - 1 = 255
+        scale = (max_val - min_val) / 255.0
+        
+        # 3. 量化 (Float -> Int)
+        # round() 是模拟量化噪声的关键
+        q_data = np.round((tensor_data - min_val) / scale)
+        
+        # 4. 截断 (模拟溢出)
+        q_data = np.clip(q_data, 0, 255)
+        
+        # 5. 反量化 (Int -> Float)
+        # 让后续的 ECO 算法以为它是 float，但其实它只剩下了 8-bit 的精度
+        dq_data = q_data * scale + min_val   
+        
+        return dq_data
 
 # FHogFeature 和 TableFeature 是纯 Numpy/C 实现，保持不变即可，
 # 但为了完整性，这里一并列出，确保 import 不出错
@@ -218,7 +335,35 @@ class FHogFeature(Feature):
             H = _gradient.fhog(M, O, self._bin_size, self._num_orients, self._soft_bin, self._clip)
             H = H[:, :, :-1]
             feat.append(H)
+        # 1. 归一化 (通常是硬件的高精度部分完成的)
         feat = self._feature_normalization(np.stack(feat, axis=3))
+        # ==========================================================
+        # 2. 模拟 INT8 量化 (Simulation of INT8 Storage)
+        # ==========================================================
+        # 注意：这里模拟的是存入样本库之前的数据截断
+        
+        # 方法 A: 动态量化 (利用当前帧最大值) - 精度较高，适合软件模拟
+        # 方法 B: 静态量化 (利用理论最大值, FHOG通常clip在0.2) - 更像硬件定点数
+        
+        # 这里我们采用更稳健的动态量化方案：
+        max_val = np.max(feat)
+        
+        if max_val > 1e-6: # 防止全0除零错误
+            # 计算缩放因子：映射到 0-255
+            scale_factor = 255.0 / max_val
+            
+            # 量化 (Float -> INT8)
+            feat_int8 = np.round(feat * scale_factor)
+            
+            # 截断 (确保不溢出)
+            feat_int8 = np.clip(feat_int8, 0, 255)
+            
+            # 反量化 (INT8 -> Float) 
+            # 这一步是欺骗后续的 ECO 算法，让它以为还是浮点数，但实际上精度已经丢了
+            feat = feat_int8 / scale_factor
+        
+        # ==========================================================
+
         return [feat]
 
 class TableFeature(Feature):

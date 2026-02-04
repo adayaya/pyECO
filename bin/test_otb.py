@@ -13,8 +13,8 @@ OTB50_SEQS = [
     'Box', 'Car1', 'Car4', 'CarDark', 'CarScale', 'ClifBar', 'Couple', 'Crowds', 'David', 
     'Deer', 'Diving', 'DragonBaby', 'Dudek', 'Football', 'Freeman4', 'Girl', 'Human3', 
     'Human4', 'Human6', 'Human9', 'Ironman', 'Jump', 'Jumping', 'Liquor', 'Matrix', 
-    'MotorRolling', 'Panda', 'RedTeam', 'Shaking', 'Singer2', 'Skating1', 'Skating1', 
-    'Skating2', 'Skiing', 'Soccer', 'Surfer', 'Sylvester', 'Tiger1', 'Tiger2', 'Trellis', 
+    'MotorRolling', 'Panda', 'RedTeam', 'Shaking', 'Singer2', 'Skating1', 'Skating2_1', 
+    'Skating2_2', 'Skiing', 'Soccer', 'Surfer', 'Sylvester', 'Tiger1', 'Tiger2', 'Trellis', 
     'Walking', 'Walking2', 'Woman'
 ]
 
