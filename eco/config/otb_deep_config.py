@@ -59,7 +59,7 @@ class OTBDeepConfig:
     # learning parameters 学习参数，滤波器更新使用的样本数，滤波器更新间隔
     output_sigma_factor = 1 / 8.     # label function sigma
     learning_rate = 0.010
-    num_samples = 50 # 保存50个样本
+    num_samples = 15 # 保存50个样本
     sample_replace_startegy = 'lowest_prior'
     lt_size = 0
     train_gap = 5
